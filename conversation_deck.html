@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent 協作實錄 — 簡報生成、FB 自動化與技術架構</title>
+    <style>
+        :root {
+            --primary: #1A73E8;
+            --secondary: #0F9D8A;
+            --accent: #F9AB00;
+            --alert: #D93025;
+            --dark-bg: #0a0a14;
+            --light-bg: #F8F9FA;
+            --text-dark: #202124;
+            --text-light: #FFFFFF;
+            --subtle: #5F6368;
+            --glass-bg: rgba(255,255,255,0.04);
+            --glass-border: rgba(255,255,255,0.08);
+            --glass-hover: rgba(255,255,255,0.1);
+            --radius: 16px;
+            --radius-sm: 10px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            width: 100%; height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif;
+            background: var(--dark-bg);
+            color: var(--text-light);
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ─── Presentation Shell ─── */
+        .presentation { width: 100%; height: 100%; position: relative; }
+
+        .slide {
+            width: 100%; height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: absolute; top: 0; left: 0;
+            padding: 64px 80px;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        .slide.active { display: flex; opacity: 1; }
+
+        /* ─── Progress Bar ─── */
+        .progress-bar {
+            position: fixed; top: 0; left: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 200;
+        }
+
+        /* ─── Slide Types ─── */
+        .slide.cover {
+            background: linear-gradient(160deg, #06060c 0%, var(--dark-bg) 50%, #101026 100%);
+            color: var(--text-light);
+        }
+        .slide.cover::before {
+            content: '';
+            position: absolute; inset: 0;
+            background:
+                radial-gradient(ellipse 60% 50% at 85% 15%, rgba(26,115,232,0.12) 0%, transparent 70%),
+                radial-gradient(ellipse 40% 40% at 15% 85%, rgba(15,157,138,0.08) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .slide.section-slide {
+            background: linear-gradient(135deg, var(--primary) 0%, #1557b0 100%);
+            color: var(--text-light);
+        }
+        .slide.section-slide::before {
+            content: '';
+            position: absolute; inset: 0;
+            background: radial-gradient(ellipse 50% 60% at 70% 30%, rgba(255,255,255,0.08) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        .slide.dark {
+            background: linear-gradient(170deg, #050508 0%, var(--dark-bg) 100%);
+            color: var(--text-light);
+        }
+        .slide.dark::before {
+            content: '';
+            position: absolute; inset: 0;
+            background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(26,115,232,0.03) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        .slide.light {
+            background: var(--light-bg);
+            color: var(--text-dark);
+        }
+
+        /* ─── Content Container ─── */
+        .sc { max-width: 960px; width: 100%; position: relative; z-index: 1; }
+        .sc.center { text-align: center; }
+
+        /* ─── Typography ─── */
+        h1 { font-size: 46px; font-weight: 800; line-height: 1.25; letter-spacing: -0.5px; margin-bottom: 20px; }
+        h2 { font-size: 36px; font-weight: 700; line-height: 1.3; letter-spacing: -0.5px; margin-bottom: 16px; }
+        h3 { font-size: 22px; font-weight: 600; line-height: 1.35; margin-bottom: 12px; }
+        p  { font-size: 18px; line-height: 1.75; margin-bottom: 14px; }
+
+        .tag {
+            display: inline-block;
+            font-size: 12px; font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            padding: 6px 16px;
+            border-radius: 40px;
+            margin-bottom: 20px;
+        }
+        .tag.primary { background: rgba(26,115,232,0.15); color: var(--primary); }
+        .tag.secondary { background: rgba(15,157,138,0.15); color: var(--secondary); }
+        .tag.accent { background: rgba(249,171,0,0.15); color: var(--accent); }
+        .tag.white { background: rgba(255,255,255,0.15); color: var(--text-light); }
+
+        .sub {
+            font-size: 20px; font-weight: 400;
+            color: rgba(255,255,255,0.8);
+            line-height: 1.6;
+        }
+        .light .sub { color: var(--subtle); }
+
+        .highlight { color: var(--accent); font-weight: 600; }
+        .primary-hl { color: var(--primary); font-weight: 600; }
+        .secondary-hl { color: var(--secondary); font-weight: 600; }
+
+        /* ─── Glass Card ─── */
+        .glass {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            padding: 24px 22px;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            transition: transform 0.25s, background 0.25s, border-color 0.25s;
+        }
+        .glass:hover {
+            background: var(--glass-hover);
+            border-color: rgba(255,255,255,0.15);
+            transform: translateY(-3px);
+        }
+        .light .glass {
+            background: rgba(255,255,255,0.85);
+            border-color: rgba(0,0,0,0.06);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.03);
+        }
+        .light .glass:hover {
+            background: #FFFFFF;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+            border-color: rgba(0,0,0,0.1);
+        }
+
+        /* ─── Grid ─── */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 24px 0; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 24px 0; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0; }
+
+        /* ─── Stats ─── */
+        .stat { text-align: center; }
+        .stat-num {
+            font-size: 40px; font-weight: 800;
+            background: linear-gradient(135deg, var(--accent), #ffcf66);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1.1;
+        }
+        .light .stat-num {
+            background: linear-gradient(135deg, var(--primary), #4c91f0);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .stat-label {
+            font-size: 14px; color: rgba(255,255,255,0.6);
+            margin-top: 6px; font-weight: 500;
+        }
+        .light .stat-label { color: var(--subtle); }
+
+        /* ─── Quote / Callout ─── */
+        .quote {
+            position: relative;
+            padding: 16px 20px 16px 44px;
+            font-size: 16px; line-height: 1.7;
+            color: rgba(255,255,255,0.9);
+            border-left: 3px solid var(--accent);
+            margin: 12px 0;
+            background: rgba(255,255,255,0.02);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+        }
+        .quote::before {
+            content: '\201C';
+            position: absolute; left: 14px; top: 8px;
+            font-size: 36px; color: var(--accent); opacity: 0.6;
+            font-family: Georgia, serif;
+        }
+        .light .quote {
+            background: rgba(0,0,0,0.01);
+            color: var(--text-dark);
+        }
+
+        /* ─── Pill / Badge ─── */
+        .pill {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 40px;
+            font-size: 14px; font-weight: 600;
+            margin: 4px;
+        }
+        .pill.accent  { background: rgba(249,171,0,0.15); color: var(--accent); }
+        .pill.secondary  { background: rgba(15,157,138,0.15); color: var(--secondary); }
+        .pill.primary  { background: rgba(26,115,232,0.15); color: var(--primary); }
+
+        /* ─── Flow / Timeline ─── */
+        .flow {
+            display: flex; align-items: stretch; gap: 12px;
+            margin: 24px 0;
+        }
+        .flow-step {
+            flex: 1;
+            padding: 20px 16px;
+            text-align: center;
+            border-radius: var(--radius);
+        }
+        .flow-icon {
+            font-size: 32px; margin-bottom: 10px;
+        }
+        .flow-title {
+            font-size: 16px; font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--accent);
+        }
+        .flow-desc {
+            font-size: 13px; color: rgba(255,255,255,0.65);
+            line-height: 1.6;
+        }
+        .light .flow-desc { color: var(--subtle); }
+
+        /* ─── Comparison Table ─── */
+        .compare {
+            display: grid; grid-template-columns: 1fr 1fr;
+            border-radius: var(--radius);
+            overflow: hidden;
+            margin: 24px 0;
+        }
+        .compare-col { padding: 24px 20px; }
+        .compare-col.left {
+            background: rgba(217,48,37,0.06);
+            border: 1px solid rgba(217,48,37,0.12);
+            border-radius: var(--radius) 0 0 var(--radius);
+        }
+        .compare-col.right {
+            background: rgba(15,157,138,0.06);
+            border: 1px solid rgba(15,157,138,0.12);
+            border-radius: 0 var(--radius) var(--radius) 0;
+        }
+        .compare-head {
+            font-size: 16px; font-weight: 700;
+            margin-bottom: 16px; letter-spacing: 0.5px;
+        }
+        .compare-col.left .compare-head { color: var(--alert); }
+        .compare-col.right .compare-head  { color: var(--secondary); }
+        .compare-item {
+            font-size: 15px; line-height: 1.6;
+            padding: 5px 0;
+            color: rgba(255,255,255,0.85);
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .light .compare-item { color: var(--text-dark); }
+        .compare-item .icon { font-weight: bold; }
+        .compare-col.left .compare-item .icon { color: var(--alert); }
+        .compare-col.right .compare-item .icon { color: var(--secondary); }
+
+        /* ─── Navigation ─── */
+        .nav {
+            position: fixed; bottom: 24px;
+            left: 50%; transform: translateX(-50%);
+            display: flex; align-items: center; gap: 16px;
+            z-index: 200;
+            background: rgba(10,10,20,0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 48px;
+            padding: 8px 12px;
+        }
+        .nav-btn {
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.8);
+            font-size: 16px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        }
+        .nav-btn:hover {
+            background: rgba(255,255,255,0.12);
+            color: var(--text-light);
+        }
+        .nav-counter {
+            font-size: 14px; font-weight: 600;
+            color: rgba(255,255,255,0.6);
+            min-width: 56px; text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ─── Keyboard Hint ─── */
+        .kb-hint {
+            position: fixed; bottom: 32px; right: 32px;
+            font-size: 12px; color: rgba(255,255,255,0.25);
+            z-index: 200;
+            background: rgba(255,255,255,0.03);
+            padding: 4px 10px;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        /* ─── Responsive ─── */
+        @media (max-width: 1024px) {
+            .slide { padding: 40px; }
+            h1 { font-size: 38px; } h2 { font-size: 28px; }
+            .grid-2 { grid-template-columns: 1fr 1fr; }
+            .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+            .compare { grid-template-columns: 1fr; }
+            .compare-col.left { border-radius: var(--radius) var(--radius) 0 0; }
+            .compare-col.right  { border-radius: 0 0 var(--radius) var(--radius); }
+        }
+        @media (max-width: 640px) {
+            .slide { padding: 24px 20px; }
+            h1 { font-size: 28px; } h2 { font-size: 22px; } p { font-size: 16px; }
+            .grid-2 { grid-template-columns: 1fr; }
+            .stat-num { font-size: 32px; }
+            .flow { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="progress-bar" id="progressBar"></div>
+
+<div class="presentation">
+
+    <!-- ============================================ -->
+    <!-- S01: Title Cover                             -->
+    <!-- ============================================ -->
+    <div class="slide cover active">
+        <div class="sc center">
+            <span class="tag primary">AI Agent 協作實錄</span>
+            <h1 style="font-size: 48px; margin-bottom: 12px;">探索智能邊界</h1>
+            <p class="sub" style="font-size: 24px; margin-bottom: 36px; color: var(--secondary);">簡報自動生成、社群自動化與技術架構解析</p>
+            <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+                <span class="pill primary">多協程 Agent 架構</span>
+                <span class="pill secondary">FB 貼文自動化探索</span>
+                <span class="pill accent">新思惟簡報迭代</span>
+            </div>
+            <p style="margin-top: 56px; font-size: 14px; color: rgba(255,255,255,0.4);">
+                人機協作演示簡報 | 2026 年 5 月
+            </p>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- S02: Overview                                -->
+    <!-- ============================================ -->
+    <div class="slide light">
+        <div class="sc">
+            <span class="tag primary">Overview</span>
+            <h2>本次對話精華概覽</h2>
+            <p class="sub" style="margin-bottom: 32px;">串聯簡報、社群自動化與技術本質的跨領域探討</p>
+
+            <div class="grid-4">
+                <div class="glass" style="text-align:center;">
+                    <div class="stat-num">v4 ~ v7</div>
+                    <div class="stat-label">簡報迭代歷程</div>
+                </div>
+                <div class="glass" style="text-align:center;">
+                    <div class="stat-num">47 個</div>
+                    <div class="stat-label">歷史圖片與產物</div>
+                </div>
+                <div class="glass" style="text-align:center;">
+                    <div class="stat-num">11 年</div>
+                    <div class="stat-label">真實學員心得沉澱</div>
+                </div>
+                <div class="glass" style="text-align:center;">
+                    <div class="stat-num">3 層</div>
+                    <div class="stat-label">Agent 任務架構</div>
+                </div>
+            </div>
+
+            <div class="glass" style="margin-top: 20px; padding: 20px 24px;">
+                <p style="font-size: 16px; line-height: 1.8; margin: 0; color: var(--subtle);">
+                    <strong style="color: var(--text-dark);">簡報精進：</strong>基於真實痛點進行文案與排版重塑，打造極致視覺與邏輯說服力。<br>
+                    <strong style="color: var(--text-dark);">技術本質：</strong>解構 Chrome+CDP 操作可能，直擊 Facebook 安全機制瓶頸，並詳釋 Antigravity 的 Parent-Subagent 指派機制。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- S03: Section — Presentations                 -->
+    <!-- ============================================ -->
+    <div class="slide section-slide">
+        <div class="sc center">
+            <span class="tag white">Part 1</span>
+            <h1>新思惟簡報迭代回顧</h1>
+            <p class="sub" style="color:rgba(255,255,255,0.85); max-width: 600px; margin: 0 auto;">
+                從 v4 到 v7，探索設計與痛點的終極對齊
+            </p>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- S04: Presentation Evolution                  -->
+    <!-- ============================================ -->
+    <div class="slide dark">
+        <div class="sc">
+            <span class="tag accent">Evolution</span>
+            <h2>簡報設計與演進里程碑</h2>
+            <p class="sub">遵循設計系統，在多次迭代中精確雕琢每一個痛點。</p>
+
+            <div class="grid-3" style="margin-top: 24px;">
+                <div class="glass">
+                    <h3 style="color: var(--accent);">v4 創立與骨架</h3>
+                    <p style="font-size: 14px; color: rgba(255,255,255,0.7); line-height: 1.6; margin: 0;">
+                        導入 <code style="color:var(--secondary);">shared-instructions.md</code>，建立高對比的深色主題，採用 HSL 色彩配置與自訂字型，跨越傳統簡報的呆板架構。
+                    </p>
+                </div>
+                <div class="glass">
+                    <h3 style="color: var(--secondary);">細節打磨與標記</h3>
+                    <p style="font-size: 14px; color: rgba(255,255,255,0.7); line-height: 1.6; margin: 0;">
+                        根據用戶個人化需求，在簡報尾頁底端整合專屬協作標記，將人機共創的紀念痕跡完美嵌入。
+                    </p>
+                </div>
+                <div class="glass">
+                    <h3 style="color: var(--primary);">v7 究極對齊版</h3>
+                    <p style="font-size: 14px; color: rgba(255,255,255,0.7); line-height: 1.6; margin: 0;">
+                        極致的「痛點-解方」對照表設計。融入 6 大真實痛點與四大解方，輔以微動態卡片與無縫流暢轉場，大幅提升簡報的商業價值。
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- S05: Token & Exec Metrics                    -->
+    <!-- ============================================ -->
+    <div class="slide dark">
+        <div class="sc">
+            <span class="tag accent">Cost Analysis</span>
+            <h2>協作消耗與運行數據</h2>
+            <p class="sub">大語言模型在複雜簡報重構任務中的執行效率指標。</p>
+
+            <div class="grid-2" style="margin-top: 24px;">
+                <div class="glass">
+                    <h3 style="color: var(--primary); margin-bottom: 12px;">Token 消耗統計</h3>
+                    <div class="quote" style="border-left-color: var(--primary);">
+                        <strong>上下文脈絡累積：</strong>由於簡報包含 20 張幻燈片與大量學員心得原始文檔，在 v4~v7 的編寫與修改過程中，經歷了上下文的 Compaction，累積消耗了約數十萬 Context Tokens。
+                    </div>
+                </div>
+                <div class="glass">
+                    <h3 style="color: var(--secondary); margin-bottom: 12px;">系統 Tool Calls (OpenCode) 次數</h3>
+                    <div class="quote" style="border-left-color: var(--secondary);">
+                        <strong>操作精準度：</strong>共呼叫了十數次系統工具，包含讀取學員文檔、寫入 HTML、調用 Chrome CDP 自動化測試截圖、以及多次的多區塊非連續檔案編輯工具，保證每一次修改都安全精準。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- S06: Section — Facebook Automation           -->
+    <!-- ============================================ -->
+    <div class="slide section-slide" style="background: linear-gradient(135deg, var(--secondary) 0%, #0c7a6b 100%);">
+        <div class="sc center">
+            <span class="tag white">Part 2</span>
+            <h1>社群自動化整理探索</h1>
+            <p class="sub" style="color:rgba(255,255,255,0.85); max-width: 600px; margin: 0 auto;">
+                AI Agent 在 Facebook 貼文整理上的實踐與極限
+            </p>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- S07: FB Automation Limits                    -->
+    <!-- ============================================ -->
+    <div class="slide dark">
+        <div class="sc">
+            <span class="tag secondary">Automation Capability</span>
+            <h2>社群整理的可能與邊界</h2>
+            <p class="sub">剖析瀏覽器模擬的極限，以及面對安全防禦的現實策略。</p>
+
+            <div class="compare" style="margin-top: 28px;">
+                <div class="compare-col left">
+                    <div class="compare-head">核心難點與瓶頸</div>
+                    <div class="compare-item">
+                        <span class="icon">✗</span> 
+                        <div><strong>反爬蟲機制 (Anti-Bot)：</strong>Facebook 擁有全球最頂尖的反爬蟲與自動化檢測系統。</div>
+                    </div>
+                    <div class="compare-item">
+                        <span class="icon">✗</span> 
+                        <div><strong>雙重驗證 (2FA)：</strong>在 Headless 模式下，異地登入極易觸發人臉驗證或手機簡訊驗證，造成自動化斷點。</div>
+                    </div>
+                    <div class="compare-item">
+                        <span class="icon">✗</span> 
+                        <div><strong>非公開貼文：</strong>社團、私人貼文必須登入才能存取，這對無狀態的 Sandbox 構成登入瓶頸。</div>
+                    </div>
+                </div>
+                <div class="compare-col right">
+                    <div class="compare-head">可行解決方案</div>
+                    <div class="compare-item">
+                        <span class="icon">✓</span> 
+                        <div><strong>無登入公開抓取：</strong>利用 Agent 瀏覽器技術 (Chrome+CDP) 抓取公開粉絲專頁或 RSS 來源。</div>
+                    </div>
+                    <div class="compare-item">
+                        <span class="icon">✓</span> 
+                        <div><strong>半自動引導登入：</strong>Agent 提供螢幕截圖與即時 DOM 交互，引導用戶進行手動登入與授權。</div>
+                    </div>
+                    <div class="compare-item">
+                        <span class="icon">✓</span> 
+                        <div><strong>API 官方接口：</strong>使用 Meta 官方 Graph API 進行結構化貼文檢索，取得最穩定的資料流。</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- S08: Section — Technical Architecture         -->
+    <!-- ============================================ -->
+    <div class="slide section-slide" style="background: linear-gradient(135deg, #202124 0%, var(--dark-bg) 100%);">
+        <div class="sc center">
+            <span class="tag white">Part 3</span>
+            <h1>Antigravity 技術架構</h1>
+            <p class="sub" style="color:rgba(255,255,255,0.85); max-width: 600px; margin: 0 auto;">
+                多 Agent 任務指派與底層協調機制解析
+            </p>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- S09: Architecture Diagram                    -->
+    <!-- ============================================ -->
+    <div class="slide dark">
+        <div class="sc center">
+            <span class="tag primary">Architecture</span>
+            <h2>多 Agent 任務指派流程</h2>
+            <p class="sub" style="margin-bottom: 32px;">解構主 Agent (Parent) 與子 Agent (Subagent) 的協作分工</p>
+
+            <div class="flow" style="max-width: 900px; margin: 0 auto;">
+                <div class="flow-step glass">
+                    <div class="flow-icon">👑</div>
+                    <div class="flow-title">Parent Agent</div>
+                    <div class="flow-desc">
+                        <strong>主控決策：</strong>直接與用戶對話，解析語意與需求，制定全域計畫，並進行高難度的決策。
+                    </div>
+                </div>
+                <div class="flow-step" style="flex: 0 0 40px; display: flex; align-items: center; justify-content: center;">
+                    <div style="font-size: 24px; color: var(--primary);">➔</div>
+                </div>
+                <div class="flow-step glass">
+                    <div class="flow-icon">⚡</div>
+                    <div class="flow-title">Subagents</div>
+                    <div class="flow-desc">
+                        <strong>併發執行：</strong>如 research 或 self，被主控端透過 <code>invoke_subagent</code> 呼叫，在隔離的工作區並行工作。
+                    </div>
+                </div>
+                <div class="flow-step" style="flex: 0 0 40px; display: flex; align-items: center; justify-content: center;">
+                    <div style="font-size: 24px; color: var(--primary);">➔</div>
+                </div>
+                <div class="flow-step glass">
+                    <div class="flow-icon">💬</div>
+                    <div class="flow-title">Message Loop</div>
+                    <div class="flow-desc">
+                        <strong>自動非同步回呼：</strong>子 Agent 完成後，透過 <code>send_message</code> 將結果推回，系統自動喚醒主 Agent，不需輪詢。
+                    </div>
+                </div>
+            </div>
+
+            <div class="quote" style="margin-top: 24px; max-width: 800px; margin-left: auto; margin-right: auto; text-align: left;">
+                <strong>底層本質：</strong>系統的最底層並非 Agent 本身管理，而是由背後的 Agent 框架進行 Sandbox 隔離、網路管控與 CDP (Chrome DevTools Protocol) 接口綁定。這使得 Agent 專注於任務推導，底層專注於安全隔離。
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- S10: Thank You                               -->
+    <!-- ============================================ -->
+    <div class="slide cover">
+        <div class="sc center">
+            <h1 style="font-size: 44px; margin-bottom: 16px;">人機攜作 · 智能未來</h1>
+            <p style="font-size: 22px; color: rgba(255,255,255,0.8); margin-bottom: 48px;">
+                感謝您在 <span class="highlight">Antigravity 平台</span> 上的精彩對話！
+            </p>
+            <div style="display: flex; justify-content: center; gap: 32px; margin-bottom: 40px;">
+                <div style="text-align: center;">
+                    <p style="font-size: 13px; color: rgba(255,255,255,0.4); margin-bottom: 4px;">協作模型</p>
+                    <p style="font-size: 16px; color: var(--secondary); margin: 0; font-weight: bold;">Gemini 3.5 Flash</p>
+                </div>
+                <div style="text-align: center;">
+                    <p style="font-size: 13px; color: rgba(255,255,255,0.4); margin-bottom: 4px;">對話 ID</p>
+                    <p style="font-size: 16px; color: var(--primary); margin: 0; font-family: monospace;">d85b84e5...3f1818ec0bbc</p>
+                </div>
+            </div>
+            <p style="font-size: 12px; color: rgba(255,255,255,0.3); margin-top: 56px;">
+                我們隨時準備好進行下一個精彩的開發任務。
+            </p>
+        </div>
+    </div>
+
+</div><!-- / presentation -->
+
+<!-- Navigation -->
+<div class="nav" id="nav">
+    <button class="nav-btn" onclick="prevSlide()" title="上一張 (←)">&#8592;</button>
+    <span class="nav-counter" id="counter">1 / 10</span>
+    <button class="nav-btn" onclick="nextSlide()" title="下一張 (→)">&#8594;</button>
+</div>
+<div class="kb-hint">← → 或 Space 翻頁</div>
+<div style="position:fixed;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,0.25);z-index:200;white-space:nowrap;">made by antigravity @ Claude sonnet 4.6</div>
+
+<script>
+    let cur = 0;
+    const slides = document.querySelectorAll('.slide');
+    const total = slides.length;
+    const bar = document.getElementById('progressBar');
+    const counter = document.getElementById('counter');
+
+    function go(n) {
+        if (n >= total) n = 0;
+        if (n < 0) n = total - 1;
+        slides[cur].classList.remove('active');
+        cur = n;
+        slides[cur].classList.add('active');
+        bar.style.width = ((cur + 1) / total * 100) + '%';
+        counter.textContent = (cur + 1) + ' / ' + total;
+    }
+
+    function nextSlide() { go(cur + 1); }
+    function prevSlide() { go(cur - 1); }
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); nextSlide(); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); prevSlide(); }
+    });
+
+    // Touch / swipe
+    let tx = 0;
+    document.addEventListener('touchstart', e => { tx = e.changedTouches[0].screenX; }, { passive: true });
+    document.addEventListener('touchend', e => {
+        const dx = e.changedTouches[0].screenX - tx;
+        if (Math.abs(dx) > 50) { dx < 0 ? nextSlide() : prevSlide(); }
+    }, { passive: true });
+
+    // Init
+    go(0);
+</script>
+
+</body>
+</html>
